@@ -1,0 +1,421 @@
+---
+title: "Assignment 3 - Part 1 - Voice In Schizophrenia"
+author: "Andreas Jeppesen, Thea Pedersen, Sofie Korch and Lina Pedersen"
+date: "October 07, 2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Assignment 3 - Part 1 - Assessing voice in schizophrenia
+
+Individuals with schizophrenia (SCZ) tend to present voice atypicalities. Their tone is described as "inappropriate" voice, sometimes monotone, sometimes croaky. This is important for two reasons. First, voice could constitute a direct window into cognitive, emotional and social components of the disorder, thus providing a cheap and relatively non-invasive way to support the diagnostic and assessment process (via automated analyses). Second, voice atypicalities play an important role in the social impairment experienced by individuals with SCZ, and are thought to generate negative social judgments (of unengaged, slow, unpleasant interlocutors), which can cascade in more negative and less frequent social interactions.
+
+Several studies show *significant* differences in acoustic features by diagnosis (see meta-analysis in the readings), but we want more. We want to know whether we can diagnose a participant only from knowing the features of their voice.
+
+The corpus you are asked to analyse is a relatively large set of voice recordings from people with schizophrenia (just after first diagnosis) and matched controls (on gender, age, education). Each participant watched several videos of triangles moving across the screen and had to describe them (so you have several recordings per person). We have already extracted the pitch once every 10 milliseconds as well as several duration related features (e.g. number of pauses, etc).
+
+N.B. For the fun of it, I threw in data from 3 different languages: 1) Danish (study 1-4); 2) Mandarin Chinese (Study 5-6); 3) Japanese (study 7). Feel free to only use the Danish data, if you think that Mandarin and Japanese add too much complexity to your analysis.
+
+In this assignment (A3), you will have to discuss a few important questions (given the data you have). More details below.
+
+*Part 1 - Can we find a difference in acoustic features in schizophrenia?*
+1) Describe your sample 
+number of studies, number of participants, age, gender, clinical and cognitive features of the two groups. Furthemore, critically assess whether the groups (schizophrenia and controls) are balanced. N.B. you need to take studies into account.
+
+
+2) Describe the acoustic profile of a schizophrenic voice: which features are different?
+E.g. People with schizophrenia tend to have high-pitched voice, and present bigger swings in their prosody than controls. N.B. look also at effect sizes. How do these findings relate to the meta-analytic findings?
+
+3) Discuss the analysis necessary to replicate the meta-analytic findings
+Look at the results reported in the paper (see meta-analysis in the readings) and see whether they are similar to those you get.
+    3.1) Check whether significance and direction of the effects are similar
+    3.2) Standardize your outcome, run the model and check whether the beta's is roughly matched (matched with hedge's g)
+which fixed and random effects should be included, given your dataset? E.g. what about language and study, age and gender? Discuss also how studies and languages should play a role in your analyses. E.g. should you analyze each study individually? Or each language individually? Or all together? Each of these choices makes some assumptions about how similar you expect the studies/languages to be.
+*Note* that there is no formal definition of replication (in statistical terms).
+
+
+Your report should look like a methods paragraph followed by a result paragraph in a typical article (think the Communication and Cognition paper)
+
+*Part 2 - Can we diagnose schizophrenia from voice only?*
+1) Discuss whether you should you run the analysis on all studies and both languages at the same time
+You might want to support your results either by your own findings or by that of others
+2) Choose your best acoustic feature from part 1. How well can you diagnose schizophrenia just using it?
+3) Identify the best combination of acoustic features to diagnose schizophrenia using logistic regression.
+4) Discuss the "classification" process: which methods are you using? Which confounds should you be aware of? What are the strength and limitation of the analysis?
+
+Bonus question: Logistic regression is only one of many classification algorithms. Try using others and compare performance. Some examples: Discriminant Function, Random Forest, Support Vector Machine, Penalized regression, etc. The packages caret and glmnet provide them. Tidymodels is a set of tidyverse style packages, which take some time to learn, but provides a great workflow for machine learning.
+
+## Learning objectives
+- Critically design, fit and report multilevel regression models in complex settings
+- Critically appraise issues of replication
+
+
+## Overview of part 1
+In the course of this part 1 of Assignment 3 you have to:
+- combine the different information from multiple files into one meaningful dataset you can use for your analysis. This involves: extracting descriptors of acoustic features from each pitch file (e.g. mean/median, standard deviation / interquartile range), and combine them with duration and demographic/clinical files
+- describe and discuss your sample
+- analyze the meaningful dataset to assess whether there are indeed differences in the schizophrenic voice and compare that to the meta-analysis
+
+There are three pieces of data:
+
+1- Demographic data (https://www.dropbox.com/s/e2jy5fyac18zld7/DemographicData.csv?dl=0). It contains
+
+- Study: a study identifier (the recordings were collected during 6 different studies with 6 different clinical practitioners in 2 different languages)
+- Language: Danish, Chinese and Japanese
+- Participant: a subject ID
+- Diagnosis: whether the participant has schizophrenia or is a control
+- Gender
+- Education
+- Age
+- SANS: total score of negative symptoms (including lack of motivation, affect, etc). Ref: Andreasen, N. C. (1989). The Scale for the Assessment of Negative Symptoms (SANS): conceptual and theoretical foundations. The British Journal of Psychiatry, 155(S7), 49-52.
+- SAPS: total score of positive symptoms (including psychoses, such as delusions and hallucinations): http://www.bli.uzh.ch/BLI/PDF/saps.pdf
+- VerbalIQ: https://en.wikipedia.org/wiki/Wechsler_Adult_Intelligence_Scale
+- NonVerbalIQ: https://en.wikipedia.org/wiki/Wechsler_Adult_Intelligence_Scale
+- TotalIQ: https://en.wikipedia.org/wiki/Wechsler_Adult_Intelligence_Scale
+
+2. Articulation.txt (https://www.dropbox.com/s/vuyol7b575xdkjm/Articulation.txt?dl=0). It contains, per each file, measures of duration:
+- soundname: the name of the recording file
+- nsyll: number of syllables automatically inferred from the audio
+- npause: number of pauses automatically inferred from the audio (absence of human voice longer than 200 milliseconds)
+- dur (s): duration of the full recording
+- phonationtime (s): duration of the recording where speech is present
+- speechrate (nsyll/dur): average number of syllables per second
+- articulation rate (nsyll / phonationtime): average number of syllables per spoken second
+- ASD (speakingtime/nsyll): average syllable duration
+
+3. One file per recording with the fundamental frequency of speech extracted every 10 milliseconds (excluding pauses): https://www.dropbox.com/sh/bfnzaf8xgxrv37u/AAD2k6SX4rJBHo7zzRML7cS9a?dl=0
+- time: the time at which fundamental frequency was sampled
+- f0: a measure of fundamental frequency, in Herz
+
+NB. the filenames indicate:
+- Study: the study, 1-6 (1-4 in Danish, 5-6 in Mandarin Chinese)
+- D: the diagnosis, 0 is control, 1 is schizophrenia
+- S: the subject ID (NB. some controls and schizophrenia are matched, so there is a 101 schizophrenic and a 101 control). Also note that study 5-6 have weird numbers and no matched participants, so feel free to add e.g. 1000 to the participant ID in those studies.
+- T: the trial, that is, the recording ID for that participant, 1-10 (note that study 5-6 have more)
+
+### Getting to the pitch data
+
+You have oh so many pitch files. What you want is a neater dataset, with one row per recording, including a bunch of meaningful descriptors of pitch. For instance, we should include "standard" descriptors: mean, standard deviation, range. Additionally, we should also include less standard, but more robust ones: e.g. median, iqr, mean absoluted deviation, coefficient of variation. The latter ones are more robust to outliers and non-normal distributions.
+
+Tip: Load one file (as a sample) and:
+- write code to extract the descriptors
+- write code to extract the relevant information from the file names (Participant, Diagnosis, Trial, Study)
+Only then (when everything works) turn the code into a function and use map_df() to apply it to all the files.
+See placeholder code here for help.
+
+```{r}
+#pacman::p_install("withr")
+library(tidyverse)
+library(readr)
+library(stringr)
+#install.packages("FinCal")
+library(FinCal)
+#install.packages("DescTools")
+library(DescTools)
+
+# saving list of all file names in the Pitch folder in my working directory
+list <- list.files(path = "Pitch", pattern = NULL, all.files = FALSE, full.names = TRUE)
+
+# We create a function for reading the data files and creating the relevant columns:
+read_pitch <- function(filename) {
+    # load data
+    data1 <- read.delim(file = filename)
+    
+    # Making an empty column for filename
+    data1$filename = ""
+    data1$filename = filename
+    
+    # mutating the data
+    data1 <- data1 %>% 
+    mutate(
+        ID = str_extract(filename, regex("\\d{3}")),        # getting 3 digits (only subject num has 3 digits in the filename)
+        Diagnosis = str_extract(filename, regex("D\\d")),   # getting 1 digit after D
+        Trial = str_extract(filename, regex("T\\d+")),      # getting any number of digits after T
+        Study = str_extract(filename, regex("y\\d")),       # getting 1 digit after y
+        Diagnosis = as.numeric(gsub("D", "", Diagnosis)),   # replacing D, T, and y with nothing
+        Trial = as.numeric(gsub("T", "", Trial)),           #-||-
+        Study = as.numeric(gsub("y", "", Study)),           #-||-
+        mean = mean(f0),                                    # Getting some stats of the data
+        sd = sd(f0),
+        range = max(f0) - min(data1$f0),
+        iqr = IQR(f0), 
+        median = median(f0),
+        meanAD = MeanAD(f0),
+        coef_of_variation = coefficient.variation(sd, mean)
+    )
+    
+    return(data1)
+}
+
+
+# test it on just one file while writing the function
+test_data = read_pitch(list[1])
+
+
+# when you've created a function that works, you can
+pitch_data = list %>%
+    purrr::map_df(read_pitch)
+
+
+# We save as a csv file
+# write_csv(pitch_data, "pitch_data.csv")
+
+
+# Loading the data
+pitch_data <- read_csv("pitch_data.csv")
+
+```
+
+
+### Now you need to merge demographic/clinical, duration and pitch data
+
+```{r}
+# Let's start with the demographic and clinical data
+Demodata <- read_delim("DemographicData.csv", delim =";")
+
+# then duration data
+Articulation <- read_delim("Articulation.txt", delim= ",")
+
+
+# We make some changes to the datasets in order to get them to correspond in terms of col.names, measure of values etc
+
+# renaming participant column to ID in demo data
+Demodata <- Demodata %>%
+    rename(
+        ID = Participant
+    )
+
+# Changing values from Control and Schizophrenia to 0 and 1 in the demo data:
+Demodata$Diagnosis <- ifelse(Demodata$Diagnosis == "Control", 0, 1)
+
+# Removing "Pitch/" and ".txt" from the filename column in the pitch data:
+pitch_data <- pitch_data %>% 
+    mutate(
+        filename = as.character(gsub("Pitch/", "", filename)),
+        filename = as.character(gsub("_f0.txt", "", filename))
+    )
+
+# Changing soundname column to filename in the articulation data:
+Articulation <- Articulation %>% 
+    rename(
+        filename = soundname
+    )
+
+# In both data sets containing an ID column we change the ID column so that it has the ID followed by 0 or 1 for Control or schizofrenic.
+# This is done because some studies paired a patient with a control and gave them one shared ID. In this way everyone will have a unique ID.
+
+pitch_data$ID <- paste0(pitch_data$ID, pitch_data$Diagnosis)
+Demodata$ID <- paste0(Demodata$ID, Demodata$Diagnosis)
+
+
+# Now we merge them
+
+df <- Reduce(function(...) merge(..., all = TRUE), list(pitch_data, Articulation, Demodata))
+# with the method above we end up with 2022 additional obs compared to the pitch data. However the articulation data is all NA for the first 20 something thousand obs.
+
+
+#mdf <- merge(pitch_data, Articulation, by = "filename")
+
+#mdf <- merge(mdf, Demodata, by = "ID")
+# the method above gives only 1.3 mil obs but not the big chunk of NAs from before
+
+
+### We have chosen to move forward with the data frame called df because the loss of data is the least here. It has failed to merge the articulation data onto some of the pitch data, so there must be some inconsistency in the filenames (and possibly also the IDs) that we cannot identify. We do not have any more time to work with this, so we will conduct the analysis on the somewhat amputated dataset.
+
+# Now we save them
+
+#write_csv(df, "merged_df.csv")
+
+#df <- read_csv("merged_df.csv")
+
+# We make a subset of all the Danish data and work only with that:
+df <- subset(df, df$Study==1:4)
+
+#write_csv(df, "til_thea.csv")
+
+
+```
+
+## Now we need to describe our sample
+
+First look at the missing data: we should exclude all recordings for which we do not have complete data.
+Then count the participants and recordinsgs by diagnosis, report their gender, age and symptom severity (SANS, SAPS and Social)
+Finally, do the same by diagnosis and study, to assess systematic differences in studies.
+I like to use group_by() %>% summarize() for quick summaries
+
+```{r}
+# We remove all NAs
+df <- na.omit(df)
+## NB: This leaves us with only Study 1 and 2 since some of the demographic data is not recorded for study 3 and 4
+
+# Loading data file as it is at this step:
+df <- read_csv("til_thea.csv")
+
+
+# Changing some variables to factor
+df$Diagnosis <- as.factor(df$Diagnosis)
+df$ID <- as.factor(df$ID)
+df$Gender <- as.factor(df$Gender)
+df$Study <- as.factor(df$Study)
+
+
+
+# We make a subset of the dataframe that only has unique IDs in order to be able to count them propperly when looking at group balancing
+subdf <- df %>%
+    group_by(ID) %>% 
+    slice(1)
+
+
+# We take a look at balance between the control group and the patient group
+# gender, age and symptom severity (SANS, SAPS and IQ)
+subdf %>%
+   mutate(
+        Diagnosis <- as.factor(Diagnosis),
+        ID <- as.factor(ID),
+        Gender <- as.factor(Gender),
+        Study <- as.factor(Study),
+    ) %>% 
+    split(subdf$Diagnosis) %>%    # splitting the dataframe into two based on Diagnosis
+  map(summary)
+
+
+# We take a look at balance between the studies:
+# gender, age and symptom severity (SANS, SAPS and IQ)
+subdf %>%
+    mutate(
+        Diagnosis <- as.factor(Diagnosis),
+        ID <- as.factor(ID),
+        Gender <- as.factor(Gender),
+        Study <- as.factor(Study)
+    ) %>% 
+    split(subdf$Study) %>%    # splitting the dataframe into two based on Study
+  map(summary)
+
+```
+
+## Now we can analyze the data
+If you were to examine the meta analysis you would find that the differences (measured as Hedges' g, very close to Cohen's d, that is, in standard deviations) to be the following
+- pitch variability (lower, Hedges' g: -0.55, 95% CIs: -1.06, 0.09)
+- proportion of spoken time (lower, Hedges' g: -1.26, 95% CIs: -2.26, 0.25)
+- speech rate (slower, Hedges' g: -0.75, 95% CIs: -1.51, 0.04)
+- pause duration (longer, Hedges' g: 1.89, 95% CIs: 0.72, 3.21). (Duration - Spoken Duration) / nPause
+
+We need therefore to set up 4 models to see how well our results compare to the meta-analytic findings (Feel free of course to test more features)
+Describe the acoustic profile of a schizophrenic voice
+*Note* in this section you need to describe the acoustic profile of a schizophrenic voice and compare it with the meta-analytic findings (see 2 and 3 in overview of part 1).
+
+```{r}
+#install.packages("effsize")
+library(effsize)
+
+
+# we change some column names in order to model from them (we dont want parenthesis and slashes in col names)
+df <- df %>% 
+    rename(
+        dur=`dur (s)`,
+        npause=`npause`,
+        phonationtime=`phonationtime (s)`,
+        speechrate=`speechrate (nsyll/dur)`,
+        articulationrate=`articulation rate (nsyll / phonationtime)`,
+        ASD=`ASD (speakingtime/nsyll)`,
+         ) %>% 
+    mutate(
+        pauseduration= (as.numeric(dur)-as.numeric(phonationtime))/as.numeric(npause)
+    )
+
+# Each time npause is 0, R computes pauseduration as Infinite. It does not make sense to have a pauseduration if there are 0 pauses, so we will change the values of Inf to NA:
+
+df$pauseduration <- ifelse(df$pauseduration == 'Inf', 'NA', df$pauseduration)
+
+# And change them back to nemueric
+df$pauseduration <- as.numeric(df$pauseduration)
+
+# Scaling the variables for the models:
+df <- df %>% 
+  mutate(
+    range_scaled = scale(range),
+    phonationtime_scaled = scale(phonationtime),
+    speechrate_scaled = scale(speechrate),
+    pauseduration_scaled = scale(pauseduration)
+  )
+
+
+# We will make 4 models predicting the 4 properties above from Diagnosis.
+# In a machine learning frame of mind, it would make more sense to see if we could make a good model for predicting diagnosis from various articulation properties, but right now we just want to asses whether there actually is a difference between the two groups.
+
+# The models give warnings of singularity when both ID and Study are included as random effects, so we will run the models with an interaction between Diagnosis and Study in order to model the differences between studies:
+
+# pitch variability:
+# We will use the range to just get the absolute variability
+m1 <- lmerTest::lmer(range_scaled ~ Diagnosis * Study + (1 | ID), df, REML = FALSE )
+summary(m1)
+
+# The beta estimate for the interaction is -0.55 and is significant
+
+
+
+# Proportion of spoken time:
+m2 <- lmerTest::lmer(phonationtime_scaled ~ Diagnosis * Study + (1 | ID), df, REML = FALSE)
+summary(m2)
+
+# The beta estimate for the interaction is -0.29 and is NOT significant
+
+
+
+# Speech rate:
+m3 <- lmerTest::lmer(speechrate_scaled ~ Diagnosis * Study + (1 | ID), df, REML = FALSE )
+summary(m3)
+
+# The beta estimate for the interaction is -0.26 and is NOT significant
+
+
+# Pause duration:
+m4 <- lmerTest::lmer(pauseduration_scaled ~ Diagnosis * Study + (1 | ID), df, REML = FALSE )
+summary(m4)
+
+# The beta estimate for the interaction is 0.17 and is NOT significant
+
+```
+
+
+N.B. the meta-analytic findings are on scaled measures. If you want to compare your results with them, you need to scale your measures as well: subtract the mean, and divide by the standard deviation.
+N.N.B. We want to think carefully about fixed and random effects in our model. In particular: how should study be included? Does it make sense to have all studies put together? Does it make sense to analyze both languages together? Relatedly: does it make sense to scale all data from all studies together?
+N.N.N.B. If you want to estimate the studies separately, you can try this syntax:  Feature ~ 0 + Study + Study:Diagnosis + [your randomEffects]. Now you'll have an intercept per each study (the estimates for the controls) and an effect of diagnosis per each study
+
+- Bonus points: cross-validate the models and report the betas and standard errors from all rounds to get an idea of how robust the estimates are. 
+
+```{r}
+   set.seed(1)
+   x <- runif(7)
+
+   # Manually scaling
+   (x - mean(x)) / sd(x)
+
+   scale(x)
+```
+
+## N.B. Remember to save the acoustic features of voice in a separate file, so to be able to load them next time
+
+
+## Reminder of the report to write 
+
+Part 1 - Can we find a difference in acoustic features in schizophrenia?
+
+1) Describe your sample 
+number of studies, number of participants, age, gender, clinical and cognitive features of the two groups. Furthemore, critically assess whether the groups (schizophrenia and controls) are balanced. N.B. you need to take studies into account.
+
+
+2) Describe the acoustic profile of a schizophrenic voice: which features are different?
+E.g. People with schizophrenia tend to have high-pitched voice, and present bigger swings in their prosody than controls. N.B. look also at effect sizes. How do these findings relate to the meta-analytic findings?
+
+3) Discuss the analysis necessary to replicate the meta-analytic findings
+Look at the results reported in the paper (see meta-analysis in the readings) and see whether they are similar to those you get.
+    3.1) Check whether significance and direction of the effects are similar
+    3.2) Standardize your outcome, run the model and check whether the beta's is roughly matched (matched with hedge's g)
+which fixed and random effects should be included, given your dataset? E.g. what about language and study, age and gender? Discuss also how studies and languages should play a role in your analyses. E.g. should you analyze each study individually? Or each language individually? Or all together? Each of these choices makes some assumptions about how similar you expect the studies/languages to be.
+
+
+- Your report should look like a methods paragraph followed by a result paragraph in a typical article (think the Communication and Cognition paper)
