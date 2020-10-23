@@ -101,6 +101,6 @@ df <- merge(Art_pitch,Demographic_data , all= TRUE)
 df1 <- Reduce(function(...) merge(..., all=TRUE), list(Pitch_data, Articulation_data, Demographic_data))
 
 # Now we save them
-write_csv(df, "merged_df.csv")
+write_csv(df, "merged_df.csv") 
 ```
 
