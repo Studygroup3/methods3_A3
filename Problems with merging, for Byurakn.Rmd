@@ -1,0 +1,106 @@
+---
+title: "Problems with merging, for Byurakn"
+author: "Lina Elkjær Pedersen"
+date: "10/23/2020"
+output: html_document
+---
+
+##################### BYURAKNS DATA CLEANING CODE #####################
+```{r}
+library(tidyverse)
+library (dplyr)
+read_pitch <- function(filename) {
+  #read data
+  df <- read_delim(paste0("Pitch/",filename), delim = "\t")
+      
+  # Making an empty column for filename
+  df$filename = ""
+  df$filename = filename
+    
+  #parse filename; study, diagnosis, subject, trial
+  vars = str_match(filename,"Study(\\d+)D([01])S(\\d+)T(\\d+)")
+  vars = as.data.frame(t(vars[2:length(vars)]))
+  names(vars) = c("Study","Diagnosis","ID","Trial")
+  #extract descriptors
+  mean <- mean(df$f0)
+  sd <- sd(df$f0)
+  min <- min(df$f0)
+  max <- max(df$f0)
+  median <- median(df$f0)
+  iqr <- IQR(df$f0) #InterQuartile Range
+  mad <- mad(df$f0) #Median absolute deviation
+  range <- max(df$f0) -  min(df$f0)
+  coefvar <- sd(df$f0)/mean(df$f0) #Coefficient variation
+  df <- cbind(vars,data.frame(mean, sd, min, max, median, iqr, mad, coefvar, filename))
+  #combine all this data
+  return(df)
+}
+Pitch_data = list.files(path = "Pitch", pattern = ".txt") %>%
+    purrr::map_df(read_pitch)
+write_csv(Pitch_data, "pitch_data1.csv")
+```
+
+
+
+### Now you need to merge demographic/clinical, duration and pitch data
+
+#Demo-data cleanup
+```{r}
+Demographic_data <- read_delim("DemographicData.csv", delim =";")
+
+Demographic_data <- rename(Demographic_data, ID=Participant)
+
+# Changing values from Control and Schizophrenia to 0 and 1 in the demo data
+Demographic_data$Diagnosis <- ifelse(Demographic_data$Diagnosis == "Control", 0, 1)
+Demographic_data <- as.data.frame(Demographic_data)
+
+#Making ID's unique
+Demographic_data$ID <- paste0(Demographic_data$ID, Demographic_data$Diagnosis)
+```
+
+#Articulation-data cleanup
+```{r}
+Articulation_data <- read_delim("Articulation.txt", delim= ",")
+
+Articulation_data<- rename(Articulation_data, filename= soundname)
+
+#Creating additional columns for Study, Diagnosis, ID and Trial
+vars1 = str_match(Articulation_data$filename,"Study(\\d+)D([01])S(\\d+)T(\\d+)")
+vars1= as.data.frame(vars1)
+vars1 <- select(vars1,-1)
+names(vars1) = c("Study","Diagnosis","ID","Trial")
+Articulation_data <- cbind(Articulation_data,vars1)
+
+#Removing the column "filename"
+Articulation_data <- select(Articulation_data,-"filename")
+
+#Making ID's unique
+Articulation_data$ID <- paste0(Articulation_data$ID, Articulation_data$Diagnosis)
+```
+
+#Pitch-data additional cleanup
+```{r}
+Pitch_data <- read_delim("pitch_data1.csv", delim = ",")
+
+Pitch_data$filename <- gsub("Pitch/", "", Pitch_data$filename) 
+Pitch_data$filename <- gsub("_f0.txt", "", Pitch_data$filename)
+Pitch_data <- select(Pitch_data,-"filename")
+
+#Making ID's unique
+Pitch_data$ID <- paste0(Pitch_data$ID, Pitch_data$Diagnosis)
+
+```
+
+#Merging
+```{r}
+# Now we merge them. DOESNT WORK
+Art_pitch <- merge(Pitch_data, Articulation_data, all=TRUE)
+df <- merge(Art_pitch,Demographic_data , all= TRUE)
+
+#This doesn't work either. Both methods creates the same amount of additional observations
+df1 <- Reduce(function(...) merge(..., all=TRUE), list(Pitch_data, Articulation_data, Demographic_data))
+
+# Now we save them
+write_csv(df, "merged_df.csv")
+```
+
