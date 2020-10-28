@@ -1,6 +1,6 @@
 ---
 title: "Problems with merging, for Byurakn"
-author: "Lina Elkjær Pedersen"
+author: "Lina Elkjær Pedersen "
 date: "10/23/2020"
 output: html_document
 ---
@@ -31,13 +31,16 @@ read_pitch <- function(filename) {
   mad <- mad(df$f0) #Median absolute deviation
   range <- max(df$f0) -  min(df$f0)
   coefvar <- sd(df$f0)/mean(df$f0) #Coefficient variation
-  df <- cbind(vars,data.frame(mean, sd, min, max, median, iqr, mad, coefvar, filename))
+  df <- cbind(vars,data.frame(mean, sd, min, max, median, iqr, mad, coefvar, filename, range))
   #combine all this data
   return(df)
 }
 Pitch_data = list.files(path = "Pitch", pattern = ".txt") %>%
     purrr::map_df(read_pitch)
-write_csv(Pitch_data, "pitch_data1.csv")
+
+
+########################    NB: WRITING THE CSV PITCH_DATA HERE RESULTS IN A DOUBLING OF THE OBSERVATIONS. DO NOT DO THIS!  #################################
+#write_csv(Pitch_data, "pitch_data1.csv")
 ```
 
 
@@ -80,7 +83,7 @@ Articulation_data$ID <- paste0(Articulation_data$ID, Articulation_data$Diagnosis
 
 #Pitch-data additional cleanup
 ```{r}
-Pitch_data <- read_delim("pitch_data1.csv", delim = ",")
+#Pitch_data <- read_delim("pitch_data1.csv", delim = ",")
 
 Pitch_data$filename <- gsub("Pitch/", "", Pitch_data$filename) 
 Pitch_data$filename <- gsub("_f0.txt", "", Pitch_data$filename)
@@ -100,7 +103,60 @@ df <- merge(Art_pitch,Demographic_data , all= TRUE)
 #This doesn't work either. Both methods creates the same amount of additional observations
 df1 <- Reduce(function(...) merge(..., all=TRUE), list(Pitch_data, Articulation_data, Demographic_data))
 
+
 # Now we save them
 write_csv(df, "merged_df.csv") 
+
+#df_omit <- na.omit(df)
+
+df_sub1 <- subset(df_omit, df$Study==1:4)
+
+df <- df %>% 
+    rename(
+        dur=` dur (s)`,
+        npause=` npause`,
+        phonationtime=` phonationtime (s)`,
+        speechrate=` speechrate (nsyll/dur)`,
+        articulationrate=` articulation rate (nsyll / phonationtime)`,
+        ASD=` ASD (speakingtime/nsyll)`
+         ) %>%
+    mutate(
+        npause=as.numeric(npause),
+        speechrate=as.numeric(speechrate),
+        pauseduration= (as.numeric(dur)-as.numeric(phonationtime))/as.numeric(npause),
+        pauseduration=as.numeric(pauseduration)
+    )
+
+
+df$pauseduration <- ifelse(df$pauseduration=="Inf", NA, df$pauseduration) #The model won't run when it has infinity values
+
+
+df <- df %>% 
+    mutate(
+        range_scaled=scale(as.numeric(range)),
+        phonationtime_scaled=scale(as.numeric(phonationtime)),
+        speechrate_scaled=scale(as.numeric(speechrate)),
+        pauseduration_scaled=scale(as.numeric(pauseduration))
+        
+    )
+```
+
+
+
+```{r}
+
+#Does not make sense why this works with the "&" we would assume it should have been "|"  
+df_new_sub <- subset(df, range!="NA" & dur!="NA" & ` nsyll`!="NA" & npause!="NA" & phonationtime!="NA")
+
+#Does the same as the code above. 
+# df_new_sub1 <- subset(df, range!="NA")
+# df_new_sub1 <- subset(df_new_sub1, dur!="NA" )
+# df_new_sub1 <- subset(df_new_sub1, ` nsyll`!="NA")
+# df_new_sub1 <- subset(df_new_sub1, npause!="NA")
+# df_new_sub1 <- subset(df_new_sub1, phonationtime!="NA")
+
+write_csv(df_new_sub, "done_df.csv") 
+
+
 ```
 
