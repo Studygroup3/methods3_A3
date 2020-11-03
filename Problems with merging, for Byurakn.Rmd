@@ -1,6 +1,6 @@
 ---
 title: "Problems with merging, for Byurakn"
-author: "Lina Elkjær Pedersen"
+author: "Lina Elkjær Pedersen "
 date: "10/23/2020"
 output: html_document
 ---
@@ -128,9 +128,6 @@ df <- df %>%
     )
 
 
-df$pauseduration <- ifelse(df$pauseduration=="Inf", NA, df$pauseduration) #The model won't run when it has infinity values
-
-
 df <- df %>% 
     mutate(
         range_scaled=scale(as.numeric(range)),
@@ -139,6 +136,10 @@ df <- df %>%
         pauseduration_scaled=scale(as.numeric(pauseduration))
         
     )
+
+df$pauseduration <- ifelse(df$pauseduration=="Inf", NA, df$pauseduration) #The model won't run when it has infinity values
+
+
 ```
 
 
@@ -147,6 +148,7 @@ df <- df %>%
 
 #Does not make sense why this works with the "&" we would assume it should have been "|"  
 df_new_sub <- subset(df, range!="NA" & dur!="NA" & ` nsyll`!="NA" & npause!="NA" & phonationtime!="NA")
+
 
 #Does the same as the code above. 
 # df_new_sub1 <- subset(df, range!="NA")
