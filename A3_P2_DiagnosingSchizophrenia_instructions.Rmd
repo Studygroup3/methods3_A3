@@ -1,7 +1,7 @@
 ---
 title: "Assignment 3 - Part 2 - Diagnosing Schizophrenia from Voice"
-author: "Riccardo Fusaroli"
-date: "October 17, 2017"
+author: "Andreas Jeppesen, Thea Pedersen, Sophie Korch & Lina Pedersen"
+date: "November 3, 2020"
 output: html_document
 ---
 
@@ -42,10 +42,266 @@ N.N.N.B. Now you have two levels of structure: subject and study. Should this im
 N.N.N.N.B. A more advanced solution could rely on the tidymodels set of packages (warning: Time-consuming to learn as the documentation is sparse, but totally worth it)
 
 
+################################# LOADING DATA ####################################
+```{r}
+library(tidyverse)
+library(lme4)
+library(caret)
 
+
+done_df <- read_csv("done_df.csv")
+
+df <- subset(done_df, range_scaled!="NA" & pauseduration_scaled!="NA" & npause!="NA" & phonationtime!="NA" & Diagnosis !="NA")
+
+# m1 <- glmer(Diagnosis ~ range_scaled + (1 | ID), df, family= "binomial")
+# 
+# summary(m1)
+# 
+# df$Diagnosis <- ifelse(df$Diagnosis=="1", "Schizophrenia", "Control")
+# 
+# 
+# 
+# # We create a function for turning log odds to probabilities:
+# logit2prob <- function(logit) {
+#   odds <- exp(logit)
+#   prob <- odds / (1 + odds)
+#   return(prob)
+# }
+# 
+# #The model predicts everyone to be controls. WHY?
+# df$pred <- logit2prob(predict(m1, re.form=NA))
+# df$pred <- as.numeric(df$pred)
+# df$pred <- ifelse(df$pred > 0.5, 1, 0)
+# df$pred=as.factor(df$pred)
+# df$Diagnosis=as.factor(df$Diagnosis)
+# ############################## All comes out control ############################## 
+# confusionMatrix(data= df$pred, reference= df$Diagnosis, positive = 1)
+
+```
+
+
+############################# CREATING FOLDS ######################################
+```{r}
+#install.packages("groupdata2")
+#install.packages("cvms")
+library(groupdata2)
+library(cvms)
+
+#Ensuring repreducibility
+set.seed(1)
+
+df$ID=as.factor(df$ID)
+
+df <- df %>% 
+    mutate(
+        range_scaled=NULL,
+        phonationtime_scaled=NULL,
+        speechrate_scaled=NULL,
+        pauseduration_scaled=NULL,
+        articulation_scaled=NULL)
+
+
+df <- fold(
+  df, 
+  k=5, 
+  cat_col = "Diagnosis", 
+  id_col = "ID", 
+  num_fold_cols = 5,
+  ) 
+
+
+# Split into train and test sets
+test_df <- df %>% 
+  dplyr::filter(.folds_1 == 3)
+
+train_df <- df %>% 
+  dplyr::filter(.folds_1 != 3)
+
+ test_df <- na.omit(test_df) 
+```
+
+
+
+########################### SCALING SPEECH PARAMETERS ##################################
+```{r}
+test_df <- test_df %>% 
+    mutate(
+        range_scaled=scale(as.numeric(range)),
+        phonationtime_scaled=scale(as.numeric(phonationtime)),
+        speechrate_scaled=scale(as.numeric(speechrate)),
+        pauseduration_scaled=scale(as.numeric(pauseduration)),
+        articulation_scaled=scale(as.numeric(articulationrate))
+    )
+
+ train_df <- train_df %>% 
+    mutate(
+        range_scaled=scale(as.numeric(range)),
+        phonationtime_scaled=scale(as.numeric(phonationtime)),
+        speechrate_scaled=scale(as.numeric(speechrate)),
+        pauseduration_scaled=scale(as.numeric(pauseduration)),
+        articulation_scaled=scale(as.numeric(articulationrate))
+    )
+
+```
+
+
+
+############################### PREDICTING SCORES ########################################
+```{r}
+# Fitting SVM model
+svm_model <- e1071::svm(
+    formula = Diagnosis ~ range_scaled + pauseduration_scaled + articulation_scaled, 
+    data = train_df,
+    kernel = "linear",
+    cost = 10,
+    type = "C-classification",
+    probability = TRUE)
+
+
+# Predict scores in the test set
+predicted_scores <- predict(
+  svm_model,
+  newdata = test_df,
+  allow.new.levels = TRUE,
+  probability = TRUE)
+
+test_df$predicted_scores <- as.numeric(predicted_scores)
+test_df$Diagnosis <- as.numeric(test_df$Diagnosis)
+
+
+test_df$Diagnosis=as.factor(test_df$Diagnosis)
+test_df$predicted_scores=as.factor(test_df$predicted_scores)
+
+#Creating a confusion matrix
+confusionMatrix(data= test_df$predicted_scores, reference= test_df$Diagnosis, positive = "1") 
+#Accuracy was 0.59
+
+```
+
+
+
+################################ CREATING A MODEL FUNCTION #################################
 ```{r}
 
+clf_svm_model_fn <- function(train_data, formula, hyperparameters) {
+
+  e1071::svm(
+    formula = formula,
+    data = train_data,
+    type = "C-classification",
+    probability = TRUE  # Must enable probability here
+  )
+}
 
 
+#Scaling speech values in df  
+df <- df %>% 
+    mutate(
+        range_scaled=scale(as.numeric(range)),
+        phonationtime_scaled=scale(as.numeric(phonationtime)),
+        speechrate_scaled=scale(as.numeric(speechrate)),
+        pauseduration_scaled=scale(as.numeric(pauseduration)),
+        articulation_scaled=scale(as.numeric(articulationrate))
+    )
+
+
+#We need to omit NA's from the data in order for the crossvalidation function below to work. 
+#To avoid deleting more data than needed, we created a "trimmed" dataframe in which we only include the columns that we will need for the model.
+df_trimmed <- df %>% 
+  select("ID", "Diagnosis", "mean", ".folds_1", ".folds_2", ".folds_3", ".folds_4", ".folds_5", "pauseduration_scaled", "speechrate_scaled", "range_scaled", "articulation_scaled") %>% 
+  na.omit()
+
+
+#Trying the model function
+m1 <- clf_svm_model_fn(train_data = df, formula = Diagnosis ~ range_scaled)
+m1
+
+```
+
+
+
+############################## CREATING A PREDICT FUNCTION ############################
+```{r}
+# Predict function for binomial SVM
+bnml_svm_predict_fn <- function(test_data, model, formula, hyperparameters, train_data) {
+  # Predict test set
+  predictions <- predict(
+    object = model,
+    newdata = test_data,
+    allow.new.levels = TRUE,
+    probability = TRUE
+  )
+  
+  # Extract probabilities
+  probabilities <- dplyr::as_tibble(attr(predictions, "probabilities"))
+  
+  # Return second column
+  probabilities[[2]]
+}
+
+#Trying out the predict function
+p1 <- bnml_svm_predict_fn(test_data = df, model = m1)
+p1    # Vector with probabilities that diagnosis is 1
+
+
+```
+
+
+
+############################# CROSS VALIDATION #################################
+```{r}
+
+cv <- cross_validate_fn(
+  data = df_trimmed,
+  formulas = c("Diagnosis ~ range_scaled + pauseduration_scaled + speechrate_scaled + articulation_scaled + mean",
+               "Diagnosis ~ range_scaled + pauseduration_scaled + speechrate_scaled + articulation_scaled",
+               "Diagnosis ~ range_scaled + pauseduration_scaled + speechrate_scaled + mean",
+               "Diagnosis ~ range_scaled + pauseduration_scaled + articulation_scaled + mean",
+               "Diagnosis ~ range_scaled + speechrate_scaled + articulation_scaled + mean", 
+              "Diagnosis ~ pauseduration_scaled + speechrate_scaled + articulation_scaled + mean", 
+              "Diagnosis ~ range_scaled + articulation_scaled + pauseduration_scaled"),
+  type = "binomial",
+  model_fn = clf_svm_model_fn,
+  predict_fn = bnml_svm_predict_fn, 
+  fold_cols = paste0(".folds_", 1:5)
+)
+
+#Getting output
+cv
+
+#Making it look nicer
+cv %>% 
+  dplyr::mutate(`Model ID` = 1:nrow(cv_4)) %>% 
+  dplyr::arrange(dplyr::desc(`Balanced Accuracy`)) %>% 
+  select_definitions(additional_includes = c("Balanced Accuracy", "Model ID")) %>% 
+  knitr::kable()
+```
+
+
+
+
+
+######################### DID NOT GONNA USE THIS - TIDYMODELS ######################################
+```{r}
+
+# #install.packages("recipes")
+# library(recipes)
+# 
+# df$ID <- as.factor(df$ID)
+# 
+# df_par <- partition (df, p=0.8, cat_col = "Diagnosis", id_col = "ID", list_out = F)
+# df_train <- subset (df_par, .partitions==1)
+# df_test <- subset(df_par, .partitions==2)
+# 
+# rec <- df_train %>% 
+#   recipe(Diagnosis ~ ., data= df_train)
+# 
+# rec_steps <- rec %>% 
+#   step_scale(all_numeric()) %>% 
+#   step_center(all_numeric())
+# 
+# prepped_recipe <- prep(rec_steps, training = df_train, retain = T)
+# df_train_n <- juice(prepped_recipe)  %>% select(-c(Study,ID,.partitions))
+# df_test_n <- bake(rec, new_data = df_test, all_predictors()) %>% select(-c(Study,ID,.partitions))
 ```
 
