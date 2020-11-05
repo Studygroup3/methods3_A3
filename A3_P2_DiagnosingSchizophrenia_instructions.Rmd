@@ -278,6 +278,58 @@ cv %>%
 ```
 
 
+# Let's start with the demographic and clinical data
+Demo <- read_delim("/Users/au598019/Dropbox/Teaching/2020 methods 3/Assignments20/Assignment3/data/DemographicData.csv", delim = ";") %>%
+  rename(ID = Participant) %>%
+  mutate(ID = factor(ID),
+         Study = factor(Study))
+
+# then duration data
+Duration <- read_delim("/Users/au598019/Dropbox/Teaching/2020 methods 3/Assignments20/Assignment3/data/Articulation.txt", delim = ",") 
+vars = str_match(Duration$soundname,"Study(\\d+)D([01])S(\\d+)T(\\d+)")
+
+Duration <- Duration %>% mutate(
+  Study = factor(vars[,2]),
+  Diagnosis = ifelse(vars[,3]==0,"Control","Schizophrenia"),
+  ID = factor(as.numeric(vars[,4])),
+  Trial = vars[,5],
+  PauseDuration = (as.numeric(` dur (s)`) - as.numeric(` phonationtime (s)`))/as.numeric(` npause`)
+) %>%
+  rename(
+    Study = Study,
+    Diagnosis = Diagnosis,
+    ID = ID,
+    Trial = Trial,
+    SyllableN = ` nsyll`,
+    PauseN = ` npause`,
+    Duration = ` dur (s)`,
+    SpokenDuration = ` phonationtime (s)`,
+    SpeechRate = ` speechrate (nsyll/dur)`,
+    ArticulationRate = ` articulation rate (nsyll / phonationtime)`,
+    SyllableDuration = ` ASD (speakingtime/nsyll)`,
+    PauseDuration = PauseDuration
+  )
+Duration$PauseDuration[!is.finite(Duration$PauseDuration)] <- NA # or 0
+
+Pitch <- read_csv("/Users/au598019/Dropbox/Teaching/2020 methods 3/Assignments20/Assignment3/data/pitch_data.csv") %>%
+  rename(
+    ID = subject,
+    Study = study,
+    Diagnosis = diagnosis,
+    Trial = trial
+  ) %>%
+  mutate(ID = factor(ID),
+         Study = factor(Study),
+         Diagnosis = factor(ifelse(Diagnosis==0,"Control","Schizophrenia")))
+
+# Now we merge them
+
+d <- merge(Pitch, Duration, all=T)
+d <- merge(d, Demo, all=T)
+d <- d %>% subset(!is.na(Trial))
+
+# Now we save them
+write_csv(d,"/Users/au598019/Dropbox/Teaching/2020 methods 3/Assignments20/Assignment3/data/data_merge.csv")
 
 
 
