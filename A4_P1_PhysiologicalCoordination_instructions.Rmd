@@ -1,0 +1,928 @@
+---
+title: "Assignment 4 - Heart rate, respiration and interpersonal coordination"
+author: "Riccardo Fusaroli"
+date: "August 20, 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Assignment 4 - Heart rate, respiration and interpersonal coordination
+
+Physiological data (here heart rate [variability], and respiration) are increasingly popular. Historically treated as pernicious noise to be regressed out of neuro-imaging data, there is now increasing research on how these signals tell us something important about cognition and beyond being just a signal of cognitive processes also impact them in interesting ways. Advanced sport science, and the quantified self movement (closely followed by marketing and communication) have hailed continuous physiological tracking as a powerful way to access and modify attitudes, habits, and performance. Further, as team coordination (in the military, in decision processes and organizational contexts) is more and more in focus, research has attempted to measure how interpersonal coordination between physiological systems might tell us something important about e.g. emotional and cognitive coordination. See references in the reading list for more on this.
+
+In this assignment, you will learn to:
+- pre-process physiological data (and grow further your mad R skills)
+- model the continuous interdependence between two signals (using a multilevel model as proxy for a dynamical system approach)
+- conservatively assess the presence of coordination between to signals in a controlled context
+
+This assignment has two parts. The first part familiarizes you with heart rate, and respiration data and their preprocessing. The second part explores how to analyze interpersonal coordination of these signals.
+
+These are the questions you need to be able to answer at the end of the assignment (aka that you need to submit as part of the portfolio)
+
+1) How do you preprocess heart rate and respiration data? Describe the process. If any data needs to be excluded, list the excluded data and motivate the exclusion.
+
+2) Do you observe interpersonal coordination in heart rate and respiration? Describe your control baseline, the method used to quantify coordination, and the statistical models used to infer whether coordination was higher than in the baseline. Report the results of the models.
+
+3) Do you observe differences in coordination between conditions? Report the models and results.
+
+4) Is respiration coordination a likely driver of heart rate coordination? Describe how you would test for it. Bonus points if you actually run the tests and report methods and results.
+
+N.B. N.B. The data are collected by students from previous years (Study 1 - 4). Note that synchronous and turn-taking are the same across all four studies, but the third condition is different: in the first year it was self-paced joint reading; in the second to fourth years it was the tv-series conversation.
+
+## Let's get started
+
+### Exploring physiological signals
+The data files can be found here: https://www.dropbox.com/sh/bvvk7t3fvsplh9o/AADM6q4WrtXKvSwH5aAO1umta?dl=0
+
+- Choose one pair (one pair, three conditions, three files)
+- Load the logs
+- Produce a plot of the participants' respiration signal and a different one of the participants' HR signal.
+  N.B: remember the slides: artifacts, downsampling, scaling.
+  N.B. The gridExtra::grid.arrange() function allows you to display the plots side by side. E.g. grid.arrange(plot1, plot2, plot3, ncol=3). There are also smarter packages, like cowplot and ggpubr.
+- Can you eye-ball which condition if any displays more physiological coordination?
+
+### First we read one data file and identify the procedure
+- Load the file
+- correctly identify all columns
+- plot the data
+- deal with the artifacts
+- downsample the data
+- Add a column for study, group, trial and condition
+
+
+
+######################################### Loading libraries and data ########################################
+```{r}
+# Load the libraries
+library(tidyverse)
+library(ggplot2)
+library(groupdata2) 
+
+# Load the files
+allfiles <- list.files(path= "data", pattern = "*.csv", all.files = FALSE, full.names = TRUE)
+
+# test1 <- read_csv("data/Study1_G1_T1_Synchronous.csv")
+# test2 <- read_csv("data/Study1_G1_T2_TurnTaking.csv")
+# test3 <- read_csv("data/Study1_G1_T3_SelfPaced.csv")
+
+```
+
+
+######################################### Preprocessing function ########################################
+```{r}
+preproc_function <- function(filename) {
+    # load data
+    data1 <- read_csv(file = filename)
+
+    # Making an empty column for filename
+    data1$filename = ""
+    data1$filename = filename
+
+    # mutating the data
+    data1 <- data1 %>%
+    mutate(
+        Study = str_extract(filename, regex("y\\d")), # getting 1 digit after y
+        Group_ID = str_extract(filename, regex("G\\d+")),   # getting 3 digits (only subject num has 3 digits in the filename)
+        Trial = str_extract(filename, regex("T\\d+")),      # getting any number of digits after T
+        Condition = str_extract(filename, "[A-Z][a-z, A-Z]{8,100}"),
+        
+        Study = as.numeric(gsub("y", "", Study)),           #replacing T, and y with nothing
+        Trial = as.numeric(gsub("T", "", Trial)),
+        
+        Group_ID = paste0(Study, Group_ID), #Making ID's individual
+        
+        rownumber = row_number()
+    )%>% 
+      select(
+        Group_ID,
+        Study,
+        Condition,
+        Trial,
+        time,
+        Resp1,
+        Resp2,
+        HR1,
+        HR2,
+        rownumber
+      )
+
+    return(data1)
+}
+
+try <- preproc_function("data/Study1_G1_T1_Synchronous.csv")
+
+one_group <- allfiles[1:3] %>% 
+  purrr::map_df(preproc_function)
+```
+
+
+######################################### Removing outliers ########################################
+```{r}
+## Remove outliers
+
+# ### Tip, check the function below. This is the function explained in the video lecture
+# removeOuts <- function(ts,threshold){
+#   ts[ts > (mean(ts,na.rm=T) +
+#              (threshold*sd(ts,na.rm=T))) | 
+#        ts < (mean(ts,na.rm=T) -
+#              (threshold*sd(ts,na.rm=T)))] = mean(ts,na.rm=T)
+#   return(ts)
+# }
+# threshold=2.5 # Default value at 2.5 sds from the mean. But you can increase it, if you want.
+# 
+# removeOuts(one_group,threshold)
+
+# We chose to use create the function that changes outliers to the mean +/- 1 sd instead of the one above which just changes to the mean:
+
+removeOuts <- function(ts, threshold) {
+  higher_threshold_cond <- ts > (mean(ts, na.rm = T) + (threshold * sd(ts, na.rm = T)))
+  lower_threshold_cond <- ts < (mean(ts, na.rm = T) - (threshold * sd(ts, na.rm = T)))
+  ts[higher_threshold_cond] <- mean(ts, na.rm = T) + (threshold * sd(ts, na.rm = T))
+  ts[lower_threshold_cond] <- mean(ts, na.rm = T) - (threshold * sd(ts, na.rm = T))
+  return(ts)
+}
+
+
+threshold = 2.5 # Default value at 2.5 sds from the mean. But you can increase it, if you want.
+
+one_group <- one_group %>% 
+  mutate(
+    HR1_c = removeOuts(HR1, threshold),
+    HR2_c = removeOuts(HR2, threshold),
+    Resp1_c = removeOuts(Resp1, threshold),
+    Resp2_c = removeOuts(Resp2, threshold)
+  )
+
+# Plot raw data against those with the artifacts removed
+HR_rawplot <- ggplot(data = one_group) +
+  geom_path(aes(time, HR1, color = "P1")) +
+  geom_path(aes(time, HR2, color = "P2")) +
+  labs(x = "Time", y = "HR") +
+  ggtitle("HR raw data") +
+  theme_minimal()
+
+HR_rawplot
+
+HR_cleanplot <- ggplot(data = one_group) +
+  geom_path(aes(time, HR1_c, color = "P1")) +
+  geom_path(aes(time, HR2_c, color = "P2")) +
+  labs(x = "Time", y = "HR") +
+  ggtitle("HR artifacts removed") +
+  theme_minimal()
+
+HR_cleanplot
+
+Resp_rawplot <- ggplot(data = one_group) +
+  geom_path(aes(time, Resp1, color = "P1")) +
+  geom_path(aes(time, Resp2, color = "P2")) +
+  labs(x = "Time", y = "Respiration") +
+  ggtitle("Respiration raw data") +
+  theme_minimal()
+
+Resp_rawplot
+
+Resp_cleanplot <- ggplot(data = one_group) +
+  geom_path(aes(time, Resp1_c, color = "P1")) +
+  geom_path(aes(time, Resp2_c, color = "P2")) +
+  labs(x = "Time", y = "Respiration") +
+  ggtitle("Respiration artifacts removed") +
+  theme_minimal()
+
+Resp_cleanplot
+
+gridExtra::grid.arrange(HR_rawplot, HR_cleanplot, Resp_rawplot, Resp_cleanplot, ncol = 2)
+
+
+```
+
+
+######################################### Scaling ########################################
+```{r}
+# Scale
+
+ one_group <- one_group %>%
+   mutate(
+     Resp1_scaled = scale(Resp1_c),
+     Resp2_scaled = scale(Resp2_c),
+     HR1_scaled = scale(HR1_c),
+     HR2_scaled = scale(HR2_c)
+   )
+
+
+### Tip: if scale() gives some issues, try the one below
+#z_scale <- function(column){
+#  column_c <- (column - mean(column)) / sd(column)
+#}
+
+# Plot again to check how scaled data look like
+# Plot raw data against those with the artifacts removed
+
+HR_scaledplot <- ggplot(data = one_group) +
+  geom_path(aes(time, HR1_scaled, color = "P1")) +
+  geom_path(aes(time, HR2_scaled, color = "P2")) +
+  labs(x = "Time", y = "HR") +
+  ggtitle("HR scaled") +
+  theme_minimal()
+
+HR_scaledplot
+
+Resp_scaledplot <- ggplot(data = one_group) +
+  geom_path(aes(time, Resp1_scaled, color = "P1")) +
+  geom_path(aes(time, Resp2_scaled, color = "P2")) +
+  labs(x = "Time", y = "Respiration") +
+  ggtitle("Respiration scaled") +
+  theme_minimal()
+
+Resp_scaledplot
+
+gridExtra::grid.arrange(HR_cleanplot, HR_scaledplot, Resp_cleanplot, Resp_scaledplot, ncol = 2)
+
+```
+
+
+
+######################################### Downsampling ########################################
+```{r}
+# Downsample
+# You can use the code below. It is almost the same as the one in the video lecture.
+ one_group_downsampled = one_group %>%
+   group(n = 100, method = 'greedy') %>%
+   dplyr::summarise(
+     time = mean(time,na.rm=T),
+     HR1 = mean(HR1_scaled,na.rm=T),
+     HR2 = mean(HR2_scaled,na.rm=T),
+     Resp1 = mean(Resp1_scaled,na.rm=T),
+     Resp2 = mean(Resp2_scaled,na.rm=T),
+     Group_ID = Group_ID[1],
+     Condition = Condition[1],
+     Study = Study[1],
+     Trial = Trial[1],
+     rownumber = rownumber[1]) #the index we use to put them back together
+
+# Plot the downsampled data. You can use the code from the slides
+HR_downsampledplot <- ggplot(data = one_group_downsampled) +
+  geom_path(aes(time, HR1_scaled, color = "P1")) +
+  geom_path(aes(time, HR2_scaled, color = "P2")) +
+  labs(x = "Time", y = "HR") +
+  ggtitle("HR downsampled") +
+  theme_minimal()
+
+
+Resp_downsampledplot <- ggplot(data = one_group_downsampled) +
+  geom_path(aes(time, Resp1_scaled, color = "P1")) +
+  geom_path(aes(time, Resp2_scaled, color = "P2")) +
+  labs(x = "Time", y = "Respiration") +
+  ggtitle("Respiration downsampled") +
+  theme_minimal()
+
+
+
+gridExtra::grid.arrange(HR_scaledplot, HR_downsampledplot, Resp_scaledplot, Resp_downsampledplot, ncol = 2)
+
+# Now add the group, trial, condition to the cleaned up, scaled, downsampled data
+
+# Tip the info is in the file name
+
+
+```
+
+
+## Now we are ready to go to load and pre-process all files
+
+Go through all the files (with a function passed onto map_df), check which files should be excluded, if any, and save the pre-processed time-series. This procedure is similar to what you have done in portfolio 3. You may use the code you wrote for that assignment and adjust it to this one.
+
+A couple of tips:
+- looping will be too slow for these files (remember you have ~200 000 rows in each file!). Making a function and using Map/Map_df is your salvation.
+- you may want your first step after loading a file to be downsampling, so that you don't work with enormous amount of data
+- each study restarts the group numbering, so you should make sure to change that (e.g. 100 * Study + Group)
+- you need to make sure all the data are meaningful or something has to be removed. Plotting is your friend. E.g. "Study1_G1_T1_Synchronous" has one bad respiration signal. We could replace it with NAs
+
+
+
+######################################### Finnished preprocessing function ########################################
+```{r}
+# Define a function running the loading, artifact removal, scaling, downsampling, info adding.
+
+data_preprocess <- function(filename, threshold = 2.5){
+    # load data
+    data1 <- read_csv(file = filename)
+
+    # Making an empty column for filename
+    data1$filename = ""
+    data1$filename = filename
+
+    # mutating the data
+    data1 <- data1 %>%
+    mutate(
+        Study = str_extract(filename, regex("y\\d")), # getting 1 digit after y
+        Group_ID = str_extract(filename, regex("G\\d+")),   # getting 3 digits (only subject num has 3 digits in the filename)
+        Trial = str_extract(filename, regex("T\\d+")),      # getting any number of digits after T
+        Condition = str_extract(filename, "[A-Z][a-z, A-Z]{8,100}"),
+        
+        Study = as.numeric(gsub("y", "", Study)),           #replacing T, and y with nothing
+        Trial = as.numeric(gsub("T", "", Trial)),
+        
+        Group_ID = paste0(Study, Group_ID), #Making ID's individual
+        
+        rownumber = row_number(), #Creating column with rownumbers
+        
+        #Removing outliers
+        HR1_c = removeOuts(HR1, threshold),
+        HR2_c = removeOuts(HR2, threshold),
+        Resp1_c = removeOuts(Resp1, threshold),
+        Resp2_c = removeOuts(Resp2, threshold),
+        
+        #Scaling
+        Resp1_scaled = scale(Resp1_c),
+        Resp2_scaled = scale(Resp2_c),
+        HR1_scaled = scale(HR1_c),
+        HR2_scaled = scale(HR2_c)
+    )
+    
+     if (data1$Study == 4) {            # The time column is called "min" in study 4, so we change it to "time" in all these cases
+      data1 <- data1 %>% 
+        rename(
+          time = min
+        )
+     }
+    data1 <- data1 %>% 
+      
+      #Downsampling
+      group(n = 100, method = 'greedy') %>%
+   dplyr::summarise(
+     time = mean(time,na.rm=T),
+     HR1 = mean(HR1_scaled,na.rm=T),
+     HR2 = mean(HR2_scaled,na.rm=T),
+     Resp1 = mean(Resp1_scaled,na.rm=T),
+     Resp2 = mean(Resp2_scaled,na.rm=T),
+     Group_ID = Group_ID[1],
+     Condition = Condition[1],
+     Study = Study[1],
+     Trial = Trial[1],
+     rownumber = rownumber[1]
+   ) %>%
+    #Selecting relevant columns
+    select(
+      Group_ID,
+      .groups,
+      rownumber,
+      Study,
+      Condition,
+      Trial,
+      time,
+      Resp1,
+      Resp2,
+      HR1,
+      HR2
+      ) 
+      
+  return(data1)
+}
+ 
+
+#  Identify all files to be read
+allfiles <- list.files(path= "data", pattern = "*.csv", all.files = FALSE, full.names = TRUE)
+
+# Run the function on the whole dataset using map_df 
+
+df <- allfiles %>% 
+  purrr::map_df(data_preprocess)
+
+
+write_csv(df, "df_p4.csv") 
+
+```
+
+
+######################################### Plotting ########################################
+```{r}
+df <- read_csv("df_p4.csv")
+
+#df <- read_delim(paste0("Pitch/",filename), delim = "\t")
+
+         
+# Now we need to make sure all the data are meaningful or something has to be removed
+# E.g. "Study1_G1_T1_Synchronous" has one bad respiration signal. We could replace it with NAs
+
+#df$Resp1 <- ifelse(Study==1 & Trial==1 & Resp1==, "NA",)
+
+# plots plots plots
+
+
+Resp1 <- ggplot(data = df) +
+  geom_path(aes(time, Resp1, color = "Group_ID")) +
+  labs(x = "Time", y = "Resp1") +
+  ggtitle("Resp1") +
+  theme_minimal()
+
+Resp1
+
+Resp1s1 <- data <- df %>% 
+  subset(Study == 1) %>% 
+  ggplot() +
+  geom_path(aes(time, Resp1, color = Group_ID)) +
+  theme_minimal()
+
+Resp1s1
+
+    
+
+#RESP1: 
+#Study 1 trial 1 G1. 
+#Study 1 trial 2 G1. 
+#Study3 trail 2, group 9. 
+
+
+
+#RESP2: 
+#Study 1 trial 1, group 2. 
+#Study 1 trial 2, group 2. 
+#S1 T3 G3. 
+#S3 T3 G10
+
+
+
+#We created multiple plots. One pr each study, trial and recording(HR1, HR2, Resp1 and Resp2). 
+#We used these plots to find the specific places in which there were bad signals (for example when 1 group had the same respiration value for more than 1000 times).  
+Study1df <- subset(df, Study == 1)
+subtrial <- subset(Study1df, Trial == 2)   
+
+a <- ggplot(subtrial, aes(Resp2, fill = Group_ID))
+a + geom_histogram(binwidth = 0.05)
+```
+
+
+
+
+######################################### Removing bad data ########################################
+```{r}
+
+#Problem with Resp1, T=1 eller 2, G= 1G1
+df$Resp1 <- ifelse(df$Trial == 1 & df$Group_ID=="1G1", "NA", df$Resp1)
+df$Resp1 <- ifelse(df$Trial == 2 & df$Group_ID=="1G1", "NA", df$Resp1)
+    
+df$Resp2 <- ifelse(df$Trial == 1 & df$Group_ID=="1G1", "NA", df$Resp2)
+df$Resp2 <- ifelse(df$Trial == 2 & df$Group_ID=="1G1", "NA", df$Resp2)
+    
+#Problem with Resp1, T=2, G= 3G9
+df$Resp1 <- ifelse(df$Trial == 2 & df$Group_ID=="3G9", "NA", df$Resp1)
+    
+df$Resp2 <- ifelse(df$Trial == 2 & df$Group_ID=="3G9", "NA", df$Resp2)
+    
+#Problem with Resp2, T=1 eller 2, G= 1G2
+df$Resp2 <- ifelse(df$Trial == 1 & df$Group_ID=="1G2", "NA", df$Resp2)
+df$Resp2 <- ifelse(df$Trial == 2 & df$Group_ID=="1G2", "NA", df$Resp2)
+    
+df$Resp1 <- ifelse(df$Trial == 1 & df$Group_ID=="1G2", "NA", df$Resp1)
+df$Resp1 <- ifelse(df$Trial == 2 & df$Group_ID=="1G2", "NA", df$Resp1)
+    
+#Problem with Resp2, T=3, G= 1G3 eller 3G10
+df$Resp2 <- ifelse(df$Trial == 3 & df$Group_ID=="1G3", "NA", df$Resp2)
+df$Resp2 <- ifelse(df$Trial == 3 & df$Group_ID =="3G10", "NA", df$Resp2)
+    
+df$Resp1 <- ifelse(df$Trial == 3 & df$Group_ID=="1G3", "NA", df$Resp1)
+df$Resp1 <- ifelse(df$Trial == 3 & df$Group_ID =="3G10", "NA", df$Resp1)
+  
+
+# LAST STEP:
+# The measure of time in study 3 is not the same as in the other studies. There must be an error in filing the data and a point is missing somewhere in the value. BUT we know that after downsampling we have a sampling rate of 10Hz. In other words, the time between 2 rows is 1/10 of a second. We can see that the 3rd last decimal in the time column increases with 1 in each row, so this decimal must indicate 10ths of a second. Thus, the decimals before this are full seconds. To convert to full seconds we divide with 1000 (because then the 3rd last decimal will become the 1st decimal after the point, ie 10th of a second). We then divide with 60 to convert to minutes like in the other studies
+# This corresponds to dividing with 60,000:
+
+df$time <- ifelse(df$Study == 3, df$time/60000, df$time)
+
+
+# Save the data
+write.csv(df, "df_p4_done.csv") 
+
+
+```
+
+
+## Now we need to run some analysis
+
+Let's start with a multilevel model that accounts for 
+- stability (how each signal is autocorrelated)
+- interpersonal dependence (each signal is dependent from the previous state of the other signal)
+
+The data needs to be further prepared, so we can analyze both participants in the same model.
+We need to turn the data into a long format:
+- a column indicating own hr and one own respiration
+- a column indicating other hr and one other respiration
+- a column indicating change in hr from previous round and one in respiration
+
+We can then run an analysis where change is a function of one's previous state (stability, see slides), and the other's previous state (coupling). Make sure to:
+- set up the most interesting contrasts: how do these parameters vary by condition? which condition should be baseline?
+- set up the right random effects.
+- N.B. the model will be slow. Make sure it works on a subset of the data first!
+
+Bonus question: what if we include an additional layer? Is my heart rate just adjusting to yours, or also to how much you are adjusting to mine?
+- to start answering this we can add a column indicating the previous change in hr in the other and one in respiration
+- we can then build on the previous models by also adding the previous change in the other
+
+######################################### Reloading data and creating extra columns ########################################
+```{r}
+# Load the libraries
+library(tidyverse)
+library(ggplot2)
+library(groupdata2) 
+library(lme4)
+library(lmerTest)
+
+df <- read.csv("df_p4_done.csv")
+
+df$X.1=NULL
+
+# Generate a column for each: previous HR1, HR2, Resp1, Resp2. Tip: use the function Lag()
+# Generate a column for each: change in HR1, HR2, Resp1, Resp2
+
+df <- df %>% 
+  group_by(Group_ID, Condition) %>% 
+  mutate(
+    #Creating a column with the previous value
+    HR1_lag = lag(HR1, k=1),
+    HR2_lag = lag(HR2, k=1),
+    Resp1_lag = lag(Resp1, k=1),
+    Resp2_lag = lag(Resp2, k=1),
+    
+    #Creating a column with the next value
+    HR1_lead = lead(HR1, k=1),
+    HR2_lead = lead(HR2, k=1),
+    Resp1_lead = lead(Resp1, k=1),
+    Resp2_lead = lead(Resp2, k=1),
+    
+    #Creating a column with the change
+    HR1_change = HR1-HR1_lag,
+    HR2_change = HR2-HR2_lag,
+    Resp1_change = Resp1-Resp1_lag,
+    Resp2_change = Resp2-Resp2_lag)
+  ) %>%  
+  subset(!is.na(time))
+
+```
+
+
+######################################### Long format data ########################################
+```{r}
+#Heartrate
+df_long <- tidyr::pivot_longer(df,c(HR1, HR2), values_to = "HR_self")
+
+df_long$HR_other <- tidyr::pivot_longer(df,c(HR2, HR1))[['value']]
+
+df_long$HR_self_lag <- tidyr::pivot_longer(df,c(HR1_lag, HR2_lag))[['value']]
+
+df_long$HR_other_lag <- tidyr::pivot_longer(df,c(HR2_lag, HR1_lag))[['value']]
+
+
+
+# Resperation
+df_long$R_self <- tidyr::pivot_longer(df,c(Resp1, Resp2))[['value']]
+
+df_long$R_other <- tidyr::pivot_longer(df,c(Resp2, Resp1))[['value']]
+
+df_long$R_self_lag <- tidyr::pivot_longer(df,c(Resp1_lag, Resp2_lag))[['value']]
+
+df_long$R_other_lag <- tidyr::pivot_longer(df,c(Resp2_lag, Resp1_lag))[['value']]
+
+
+# Change
+df_long$R_self_change <- tidyr::pivot_longer(df,c(Resp1_change, Resp2_change)) [['value']]
+
+df_long$R_other_change <- tidyr::pivot_longer(df,c(Resp2_change, Resp1_change))[['value']]
+
+df_long$HR_self_change <- tidyr::pivot_longer(df,c(HR1_change, HR2_change))[['value']]
+
+df_long$HR_other_change <- tidyr::pivot_longer(df,c(HR2_change, HR1_change))[['value']]
+
+
+# Set the most interesting contrast e.g. by defining synchronous or conversation as the baseline  
+
+df_long$Condition <- relevel(df_long$Condition, ref = "Synchronous")
+
+
+```
+
+
+
+########################### SUBSET ###############################
+```{r}
+df_long_sub <- subset(df_long, Group_ID=="1G1" | Group_ID=="1G2")
+
+
+df_long$name <- paste0(df_long$Group_ID, df_long$name)
+
+#Subset using only 3 different conditions
+df_sub <- subset(df_long, Condition=="Synchronous" | Condition=="TurnTaking" | Condition == "Conversation")
+
+```
+
+
+
+
+########################### MODELS ###############################
+```{r}
+
+# Model change as a function of own and other previous state
+
+############################### HEART RATE MODELS ##############################
+
+model <- lmer(HR_self_change ~ 0 + (HR_self_lag + HR_other_lag):Condition + (0 + Condition|Group_ID), data = df_sub, REML = FALSE, control = lmerControl(optimizer = "nloptwrap", calc.derivs = FALSE))
+
+summary(model)
+#AIC 9597.4
+
+model2 <- lmer(HR_self_change ~ 0 + (HR_self_lag + HR_other_lag):Condition + (0+Condition|name)+(0 + Condition|Group_ID), data = df_sub, REML = FALSE, control = lmerControl(optimizer = "nloptwrap", calc.derivs = FALSE))
+
+summary(model2)
+#AIC  9609.4
+
+
+model3 <- lmer(HR_self_change ~ 0 + (HR_self_lag + HR_other_lag):Condition + (0+Condition|name), data = df_sub, REML = FALSE, control = lmerControl(optimizer = "nloptwrap", calc.derivs = FALSE))
+
+summary(model3)
+#AIC  9597.4  SAME AS MODEL 1
+
+
+model4 <- lmer(HR_self_change ~ 0 + (HR_self_lag + HR_other_lag):Condition + (0 + (HR_self_lag + HR_other_lag):Condition|Group_ID), data = df_sub, REML = FALSE, control = lmerControl(optimizer = "nloptwrap", calc.derivs = FALSE))
+
+summary(model4)
+#AIC   8167.9 
+
+
+
+model5 <- lmer(HR_self_change ~ 0 + (HR_self_lag + HR_other_lag):Condition + (0+(HR_self_lag + HR_other_lag):Condition|name)+(0 + (HR_self_lag + HR_other_lag):Condition|Group_ID), data = df_sub, REML = FALSE, control = lmerControl(optimizer = "nloptwrap", calc.derivs = FALSE))
+
+summary(model5)
+#AIC 7155.0
+
+
+model6 <- lmer(HR_self_change ~ 0 + (HR_self_lag + HR_other_lag):Condition + (0+(HR_self_lag + HR_other_lag):Condition|name), data = df_sub, REML = FALSE, control = lmerControl(optimizer = "nloptwrap", calc.derivs = FALSE))
+
+summary(model6)
+#AIC 7121 
+#THE BEST MODEL
+
+
+############################### RESPERATION MODELS ##############################
+
+Resp_model <- lmer(R_self_change ~ 0 + (R_self_lag + R_other_lag):Condition + (0 + Condition|Group_ID), data = df_sub, REML = FALSE, control = lmerControl(optimizer = "nloptwrap", calc.derivs = FALSE))
+
+summary(Resp_model)
+#AIC  -186352.8 
+
+Resp_model2 <- lmer(R_self_change ~ 0 + (R_self_lag + HR_other_lag):Condition + (0+Condition|name)+(0 + Condition|Group_ID), data = df_sub, REML = FALSE, control = lmerControl(optimizer = "nloptwrap", calc.derivs = FALSE))
+
+summary(Resp_model2)
+#AIC  -186377.9
+
+
+Resp_model3 <- lmer(R_self_change ~ 0 + (R_self_lag + R_other_lag):Condition + (0+Condition|name), data = df_sub, REML = FALSE, control = lmerControl(optimizer = "nloptwrap", calc.derivs = FALSE))
+
+summary(Resp_model3)
+#AIC -186352.8
+
+Resp_model4 <- lmer(R_self_change ~ 0 + (R_self_lag + HR_other_lag):Condition + (0 + (R_self_lag + R_other_lag):Condition|Group_ID), data = df_sub, REML = FALSE, control = lmerControl(optimizer = "nloptwrap", calc.derivs = FALSE))
+
+summary(Resp_model4)
+#AIC  -186415.5     
+
+
+Resp_model5 <- lmerTest::lmer(R_self_change ~ 0 + (R_self_lag + R_other_lag):Condition + (0+(R_self_lag + R_other_lag):Condition|name)+(0 + (R_self_lag + R_other_lag):Condition|Group_ID), data = df_sub, REML = FALSE, control = lmerControl(optimizer = "nloptwrap", calc.derivs = FALSE))
+
+summary(Resp_model5)
+#AIC -186935.5   BEST AIC
+
+
+Resp_model6 <- lmerTest::lmer(R_self_change ~ 0 + (R_self_lag + R_other_lag):Condition + (0+(R_self_lag + R_other_lag):Condition|name), data = df_sub, REML = FALSE, control = lmerControl(optimizer = "nloptwrap", calc.derivs = FALSE))
+
+summary(Resp_model6)
+#AIC -190170.9
+
+
+
+p <- df_long %>% 
+  subset(Study=="1" & Condition == "Conversation") %>% 
+  group_by(name) %>% 
+  mutate(time = seq(n())) %>% 
+  subset(name == "1G1HR1") %>% 
+  ggplot() + 
+  geom_line(aes(time, HR_self, colour = "HR_self")) + 
+  geom_line(aes(time, HR_other, colour = "HR_other")) +
+  #facet_wrap(Condition ~ ., ncol = 1) +
+  labs(y = "HR") +
+  theme_classic()
+
+p
+
+```
+
+
+
+
+## Now we need to create control baselines.
+
+First shuffled controls, then surrogate pairs.
+
+### Creating controls: shuffled controls
+
+Shuffled controls break the temporal dependencies of time-series by shuffling the value within one time-series. This ensures the "coordination" observed is due to the actual values in the series and not their sequence.
+Tip: sample() is your friend, but make sure to shuffle things within participant/condition and not throughout the whole dataset
+ 
+```{r}
+# Create a shuffled dataset
+?sample
+#Setting seed to ensure reproducibility
+set.seed(21)
+
+#Creating a new column and adding the value "Real" in all rows
+df_sub$Type <- "Real"
+
+#Creating a shuffled dataset and adding the column Type and adding the value "Shuffled" in all rows
+df_sub_shuffled <- df_sub %>% 
+  group_by(name, Condition) %>% 
+  mutate(
+    HR_self = sample(HR_self),
+    HR_other = sample(HR_other),
+    HR_self_lag = sample(HR_self_lag),
+    HR_other_lag = sample(HR_other_lag),
+    HR_self_change = sample(HR_self_change),
+    HR_other_change = sample(HR_other_change),
+    R_self = sample(R_self),
+    R_other = sample(R_other),
+    R_self_lag = sample(R_self_lag),
+    R_other_lag = sample(R_other_lag),
+    R_self_change = sample(R_self_change),
+    R_other_change = sample(R_other_change),
+    Type="Shuffled"
+  )
+
+# Concatenate it to the original dataset (and remember to have a column telling you which is which)
+df <- merge(df_sub, df_sub_shuffled , all= TRUE)
+
+# Create the same models as in the previous chunk, but adding an interaction by shuffled vs. real
+
+HR_int_model <- lmerTest::lmer(HR_self_change ~ 0 + (HR_self_lag + HR_other_lag):Condition:Type + (0+(HR_self_lag + HR_other_lag):Condition|name), data = df, REML = FALSE, control = lmerControl(optimizer = "nloptwrap", calc.derivs = FALSE))
+
+summary(HR_int_model)
+
+
+Resp_int_model <- lmerTest::lmer(R_self_change ~ 0 + (R_self_lag + R_other_lag):Condition:Type + (0+(R_self_lag + R_other_lag):Condition|name), data = df, REML = FALSE, control = lmerControl(optimizer = "nloptwrap", calc.derivs = FALSE))
+
+summary(Resp_int_model)
+
+
+
+```
+ 
+ 
+### TRICKY! Creating controls: surrogate pair controls
+ - Per each real pair, identify at least one surrogate pair (matching one of the participants, with somebody doing the same task, but in a different pair)
+
+```{r}
+# Identify unique pairs within a given study (to keep things manageable) and create list of possible surrogate pairs (e.g. individual 1 from pair 1 and individual 2 from pair 2)
+
+# creating group vectors:
+Groups <- as.character(unique(df$Group_ID[df$Study == 1]))
+
+# Creating a grid with all possible combinations of group IDs
+SurrogateList <- expand.grid(a = Groups, b = Groups)
+
+# Taking only the ones where the two are different
+SurrogateList1 <- subset(SurrogateList, a != b)
+
+# repeating for other studies
+
+Groups <- as.character(unique(df$Group_ID[df$Study == 2]))
+
+SurrogateList <- expand.grid(a = Groups, b = Groups)
+
+SurrogateList2 <- subset(SurrogateList, a != b)
+
+
+
+Groups <- as.character(unique(df$Group_ID[df$Study == 3]))
+
+SurrogateList <- expand.grid(a = Groups, b = Groups)
+
+SurrogateList3 <- subset(SurrogateList, a != b)
+
+
+
+Groups <- as.character(unique(df$Group_ID[df$Study == 4]))
+
+SurrogateList <- expand.grid(a = Groups, b = Groups)
+
+SurrogateList4 <- subset(SurrogateList, a != b)
+
+
+# Combining them all
+SurrogateList <- rbind(SurrogateList1, SurrogateList2, SurrogateList3, SurrogateList4)
+
+
+# Starting from the wide format, create "surrogate" dataset with the data from surrogate pairs
+# A loop
+for (i in 1:nrow(SurrogateList)){
+  x <- subset(df, Group_ID == SurrogateList$a[i])
+  y <- subset(df, Group_ID == SurrogateList$b[i])
+  group <- c(800 + ((1:4)*i))
+  for (co in c("Synchronous", "TurnTaking", "SelfPaced", "Conversation")){
+    if (co %in% unique(x$Condition) & co %in% unique(y$Condition)){
+      z1 <- subset(x, Condition == co)
+      z2 <- subset(y, Condition == co)
+    }
+    if (nrow(z1) > nrow(z2)){
+      z1 <- z1[-((nrow(z2)+1):nrow(z1)),] # cuts out everything that z1 is longer than z2
+    }
+    if (nrow(z2) > nrow(z1)){
+      z2 <- z2[-((nrow(z1)+1):nrow(z2)),] # and the opposite
+    }
+    w1 <- z1 %>% mutate(
+      HR2 = z2$HR2,
+      Resp2 = z2$Resp2,
+      HR2_lag = z2$HR2_lag,
+      HR2_change = z2$HR2_change,
+      Resp2_lag = z2$Resp2_lag,
+      Resp2_change = z2$Resp2_change)
+    w1$Group <- group[1]
+    w1$Type <- "Surrogate"
+    w <- w1
+    if(exists("d_surrogate")){d_surrogate <- rbind(d_surrogate, w)} else {d_surrogate <- w}
+  }
+}
+
+
+df$Type = "Real"
+df$Group_ID <- as.character(df$Group_ID)
+df$Group <- as.double("NA")
+dd <- rbind(df, d_surrogate)
+
+```
+ 
+ 
+ 
+ ######################################### Long format data ########################################
+```{r}
+#Heartrate
+dd_long <- tidyr::pivot_longer(dd,c(HR1, HR2), values_to = "HR_self")
+
+dd_long$HR_other <- tidyr::pivot_longer(dd,c(HR2, HR1))[['value']]
+
+dd_long$HR_self_lag <- tidyr::pivot_longer(dd,c(HR1_lag, HR2_lag))[['value']]
+
+dd_long$HR_other_lag <- tidyr::pivot_longer(dd,c(HR2_lag, HR1_lag))[['value']]
+
+
+
+# Resperation
+dd_long$R_self <- tidyr::pivot_longer(dd,c(Resp1, Resp2))[['value']]
+
+dd_long$R_other <- tidyr::pivot_longer(dd,c(Resp2, Resp1))[['value']]
+
+dd_long$R_self_lag <- tidyr::pivot_longer(dd,c(Resp1_lag, Resp2_lag))[['value']]
+
+dd_long$R_other_lag <- tidyr::pivot_longer(dd,c(Resp2_lag, Resp1_lag))[['value']]
+
+
+# Change
+dd_long$R_self_change <- tidyr::pivot_longer(dd,c(Resp1_change, Resp2_change)) [['value']]
+
+dd_long$R_other_change <- tidyr::pivot_longer(dd,c(Resp2_change, Resp1_change))[['value']]
+
+dd_long$HR_self_change <- tidyr::pivot_longer(dd,c(HR1_change, HR2_change))[['value']]
+
+dd_long$HR_other_change <- tidyr::pivot_longer(dd,c(HR2_change, HR1_change))[['value']]
+
+
+# Set the most interesting contrast e.g. by defining synchronous or conversation as the baseline  
+
+dd_long$Condition <- relevel(dd_long$Condition, ref = "Synchronous")
+
+dd_long_sub <- subset(dd_long, Condition== "Synchronous" | Condition=="TurnTaking"| Condition== "Conversation")
+```
+
+
+
+```{r}
+# Create models as in chunks above, but adding an interaction with the Real vs. Surrogate variable (exclude shuffled ones for simplicity)
+
+#The best heartrate model
+model6 <- lmerTest::lmer(HR_self_change ~ 0 + (HR_self_lag + HR_other_lag):Condition:Type + (0+(HR_self_lag + HR_other_lag):Condition|name), data = dd_long_sub, REML = FALSE, control = lmerControl(optimizer = "nloptwrap", calc.derivs = FALSE))
+
+summary(model6)
+
+#The best resp model
+Resp_model6 <- lmerTest::lmer(R_self_change ~ 0 + (R_self_lag + R_other_lag):Condition:Type + (0+(R_self_lag + R_other_lag):Condition|name), data = dd_long_sub, REML = FALSE, control = lmerControl(optimizer = "nloptwrap", calc.derivs = FALSE))
+
+summary(Resp_model6)
+
+
+```
+
+
+### Effects of respiration coordination on heart rate coordination
+ - describe how you would test those.
+ - Optional: run the models and report them
+
+ 
