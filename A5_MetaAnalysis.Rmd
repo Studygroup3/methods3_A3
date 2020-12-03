@@ -1,7 +1,7 @@
 ---
 title: "Assignment 5 - Meta-analysis of pitch in schizophrenia"
-author: "Riccardo Fusaroli"
-date: "3/7/2019"
+author: " Andreas Jeppesen, Thea Pedersen, Sophie Korch & Lina Pedersen"
+date: "3/12/2020"
 output: html_document
 ---
 
@@ -25,7 +25,7 @@ knitr::opts_chunk$set(echo = TRUE)
 Data: https://www.dropbox.com/s/0l9ur0gaabr80a8/Matrix_MetaAnalysis_Diagnosis_updated290719.xlsx?dl=0
 Prisma chart: https://www.dropbox.com/s/vbjf6ff73dv9tru/PRISMA%202009%20flow%20diagram_PP.pptx?dl=0 
 - Look through the dataset to find out which columns to use, and if there is any additional information written as comments (real world data is always messy!).
-    * Hint: PITCH_F0M and PITCH_F0SD group of variables are what you need
+    * Hint: PITCH_F0''M and PITCH_F0''SD group of variables are what you need
 - Following the procedure in the slides calculate effect size and standard error of the effect size per each study. N.B. we focus on pitch mean and pitch standard deviation.
  . first try using lmer (to connect to what you know of mixed effects models)
  . then use rma() (to get some juicy additional statistics)
@@ -35,3 +35,193 @@ Prisma chart: https://www.dropbox.com/s/vbjf6ff73dv9tru/PRISMA%202009%20flow%20d
 - Go back to Assignment 3, add your own study to the data table, and re-run meta-analysis. Do the results change?
 
 - Now look at the output of rma() and check tau and I2
+
+```{r} 
+#Libraries
+library(readxl)
+library(tidyverse)
+
+#Reading the df
+df <- read_excel("Matrix_MetaAnalysis_Diagnosis_updated290719.xlsx")
+
+#Removing all duplications of studies. 
+df <- distinct(df, StudyID, .keep_all = TRUE)
+
+# We select only the columns we are interested in: HC= Healthy controls, SZ = Schizophrenia, M=mean, SD = Standart diviation. 
+df <- df %>% 
+  select(
+    ArticleID,
+    StudyID,
+    Year_publication,
+    Article,
+    DIAGNOSIS,
+    SAMPLE_SIZE_HC,
+    SAMPLE_SIZE_SZ,
+    PITCH_F0_HC_M,
+    PITCH_F0_HC_SD,
+    PITCH_F0_SZ_M,
+    PITCH_F0_SZ_SD
+  )
+
+```
+
+############################# MODELS #####################################
+
+```{r}
+
+# USEFUL LIBRARY
+#install.packages("metafor")
+library(metafor)
+
+
+#THIS CREATES TWO NEW COLUMNS yi AND vi. yi= observed effectsize. vi= sampling variance. 
+WM_d = escalc(measure = 'SMD', n1i=SAMPLE_SIZE_HC, n2i=SAMPLE_SIZE_SZ, m1i=PITCH_F0_HC_M, m2i=df$PITCH_F0_SZ_M, sd1i=df$PITCH_F0_HC_SD, sd2i=df$PITCH_F0_SZ_SD, data = df)
+
+
+############################# MODELS: ########################################
+
+# Mixed effects implementation
+m <- lmer(yi ~ 1 + (1 | StudyID), weights = 1/vi, data=WM_d, control=lmerControl(check.nobs.vs.nlev="ignore", check.nobs.vs.nRE="ignore"))
+summary(m)
+
+# Meta-analysis optimization:
+m2 <-rma (yi, vi, data = WM_d, slab = StudyID)
+forest(m2)
+summary(m2)
+
+# # What if we have a fixed effect?
+# m_fixed <- lmer(yi ~ 1 + test+ (1 | study), weights = 1/vi, data=WM_d, control=lmerControl(check.nobs.vs.nlev="ignore", check.nobs.vs.nRE="ignore"))
+# m_fixed2 <- rma(yi, vi, mods = cbind(Language), data = data, slab=study)
+
+
+```
+
+############################# INCLUDING OUR OWN STUDY #####################################
+
+```{r}
+# We load the data from A3:
+dfA3 <- read_csv("done_df.csv")
+
+# 
+dfA3 %>%
+   mutate(
+        Diagnosis <- as.factor(Diagnosis),
+        ID <- as.factor(ID),
+        Gender <- as.factor(Gender),
+        Study <- as.factor(Study),
+    ) %>% 
+    split(dfA3$Diagnosis) %>%    # splitting the dataframe into two based on Diagnosis
+  map(summary)
+
+# mean pitch controls: 156.8
+
+# sd pitch controls: 
+controlsub <- dfA3 %>% subset(Diagnosis == 0)
+sd(controlsub$mean)
+# 59.19
+
+# mean pitch sz: 161.13
+
+# sd pitch sz:
+szsub <- dfA3 %>% subset(Diagnosis == 1)
+sd(szsub$mean)
+# 56.73
+
+
+# The number of participants in each diagnosis group
+length(unique(controlsub$ID))
+# there are 154 controls
+
+length(unique(szsub$ID))
+
+
+# there are 143 sz patients
+
+# We save our info:  (in this order of variables:)
+    #ArticleID,
+    # StudyID,
+    # Year_publication,
+    # Article,
+    # DIAGNOSIS,
+    # SAMPLE_SIZE_HC,
+    # SAMPLE_SIZE_SZ,
+    # PITCH_F0_HC_M,
+    # PITCH_F0_HC_SD,
+    # PITCH_F0_SZ_M,
+    # PITCH_F0_SZ_SD,
+Studygroup3 <- c(49, 51, 2020, "Studygroup 3 (2020)", "SZ", 154, 143, 156.8, 59.19, 161.13, 56.73)
+
+# we append this list to our df:
+df1 <- rbind(df, Studygroup3)
+```
+
+
+############################# MODELS INCLUDING OUR STUDY #####################################
+
+```{r}
+library(metafor)
+
+df1 <- df1 %>% 
+  mutate(
+    SAMPLE_SIZE_HC = as.numeric(SAMPLE_SIZE_HC),
+    SAMPLE_SIZE_SZ = as.numeric(SAMPLE_SIZE_SZ),
+    PITCH_F0_HC_M = as.numeric(PITCH_F0_HC_M),
+    PITCH_F0_SZ_M = as.numeric(PITCH_F0_SZ_M),
+    PITCH_F0_HC_SD = as.numeric(PITCH_F0_HC_SD),
+    PITCH_F0_SZ_SD = as.numeric(PITCH_F0_SZ_SD)
+  )
+
+
+#THIS CREATES TWO NEW COLUMNS yi AND vi. yi= observed effectsize. vi= sampling variance. 
+WM_d1 = escalc(measure = 'SMD', n1i=SAMPLE_SIZE_HC, n2i=SAMPLE_SIZE_SZ, m1i=PITCH_F0_HC_M, m2i=PITCH_F0_SZ_M, sd1i=PITCH_F0_HC_SD, sd2i=PITCH_F0_SZ_SD, data = df1)
+
+
+
+############################# MODELS: ########################################
+
+# Mixed effects implementation
+ m3 <- lmer(yi ~ 1 + (1 | StudyID), weights = 1/vi, data=WM_d1, control=lmerControl(check.nobs.vs.nlev="ignore", check.nobs.vs.nRE="ignore"))
+summary(m3)
+
+# Meta-analysis optimization:
+m4 <-rma (yi, vi, data = WM_d1, slab = StudyID)
+forest(m4)
+summary(m4)
+
+#I^2.  > 75% high variance. 25 – 50 % moderate variance. < 25 % low variance
+#τ^2 #the lower the value, the lower the heterogeneity (0 when no heterogeneity)
+
+```
+
+
+############################# PLOTTING #####################################
+
+```{r}
+###################### Forest plots and effect size estimation #########################
+
+#Checking if each study has roughly the same influence
+inf <- influence(m4)
+print(inf)
+plot(inf)
+
+
+#Plotting effect size against standard error
+funnel(m4)
+
+#Statistical measures of checking asymmatry in funnel plot
+regtest(m4)
+ranktest(m4)
+
+
+##################################### New functions used in this lecture #####################################
+# library (metaphor)
+# escalc()
+# rma()
+# forest()
+# funnel()
+# influence()
+# regtest()
+# ranktest()
+
+```
+
